@@ -1,0 +1,16 @@
+This repository is an independent Debian/Proxmox packaging of the
+UGREEN DX/DXP LED controller.
+
+Upstream project (protocol, kernel module, CLI, monitor scripts):
+  https://github.com/miskcoo/ugreen_leds_controller
+  Author: Yuhao Zhou <miskcoo@gmail.com>
+  License: MIT
+
+This repository is NOT a GitHub fork. It vendors a snapshot of the
+upstream sources and adds a one-shot installer aimed at Debian-based
+hosts (Proxmox VE 8 / Debian 12 and compatible).
+
+Protocol write-up (Chinese):
+  https://blog.miskcoo.com/2024/05/ugreen-dx4600-pro-led-controller
+
+Upstream commit vendored in this tree: see UPSTREAM_COMMIT.

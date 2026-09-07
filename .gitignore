@@ -1,0 +1,15 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.cmd
+Module.symvers
+modules.order
+.tmp_versions/
+ugreen_leds_cli
+ugreen-blink-disk
+ugreen-check-standby
+*.deb
+*.rpm
+.cache/
