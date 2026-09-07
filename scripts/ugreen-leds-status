@@ -1,0 +1,72 @@
+#!/usr/bin/bash
+# Show UGREEN LED hardware + service status.
+
+set -euo pipefail
+
+echo "=== Host ==="
+echo "  kernel : $(uname -r)"
+if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    echo "  os     : ${PRETTY_NAME:-unknown}"
+fi
+if command -v pveversion >/dev/null 2>&1; then
+    echo "  pve    : $(pveversion | head -n1)"
+fi
+echo "  dmi    : $(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null || echo ?) $(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || echo ?)"
+echo
+
+echo "=== I2C (expect SMBus I801 + slave 0x3a) ==="
+if command -v i2cdetect >/dev/null 2>&1; then
+    i2cdetect -l 2>/dev/null || true
+    bus=$(i2cdetect -l 2>/dev/null | awk '/SMBus I801 adapter/{print $1; exit}')
+    if [ -n "${bus:-}" ]; then
+        echo
+        echo "Scan ${bus}:"
+        i2cdetect -y "${bus#i2c-}" 2>/dev/null || true
+    else
+        echo "  SMBus I801 adapter not found"
+    fi
+else
+    echo "  i2c-tools not installed"
+fi
+echo
+
+echo "=== Kernel modules ==="
+lsmod | awk '/i2c_dev|led_ugreen|ledtrig_oneshot|ledtrig_netdev/{print "  "$0}'
+echo
+
+echo "=== /sys/class/leds ==="
+if [ -d /sys/class/leds ]; then
+    found=0
+    for led in power netdev disk1 disk2 disk3 disk4 disk5 disk6 disk7 disk8; do
+        if [ -e "/sys/class/leds/${led}" ]; then
+            found=1
+            status="?"
+            [ -r "/sys/class/leds/${led}/status" ] && status=$(tr -d '\n' < "/sys/class/leds/${led}/status")
+            echo "  ${led}: ${status}"
+        fi
+    done
+    if [ "$found" -eq 0 ]; then
+        echo "  no ugreen LEDs registered (run ugreen-probe-leds)"
+    fi
+fi
+echo
+
+echo "=== systemd ==="
+for unit in ugreen-probe-leds ugreen-diskiomon ugreen-power-led ugreen-netdevmon-multi; do
+    if systemctl list-unit-files "${unit}.service" >/dev/null 2>&1; then
+        state=$(systemctl is-active "${unit}.service" 2>/dev/null || true)
+        enabled=$(systemctl is-enabled "${unit}.service" 2>/dev/null || true)
+        echo "  ${unit}: ${state} (${enabled})"
+    fi
+done
+systemctl list-units --type=service --all 'ugreen-netdevmon@*' --no-legend 2>/dev/null | awk '{print "  "$1": "$3" "$4}'
+echo
+
+echo "=== config ==="
+if [ -f /etc/ugreen-leds.conf ]; then
+    awk -F= '/^MAPPING_METHOD=|^DISK_SERIAL=/{print "  "$0}' /etc/ugreen-leds.conf
+else
+    echo "  /etc/ugreen-leds.conf missing"
+fi
