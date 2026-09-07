@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
 # One-shot installer for UGREEN DX/DXP front-panel LEDs on Debian-based hosts.
 # Target: Proxmox VE 8 (Debian 12) and other Debian/Ubuntu hosts running on the bare metal.
-#
-# Usage (on the NAS / PVE HOST, not inside a VM or LXC):
-#   sudo bash install.sh
-#   sudo NETIF=enp2s0 MAPPING_METHOD=ata bash install.sh
-#   sudo bash install.sh --status
-#   sudo bash install.sh --uninstall
 
 set -euo pipefail
 
@@ -14,6 +8,7 @@ VERSION="$(cat "$(cd "$(dirname "$0")" && pwd)/VERSION" 2>/dev/null || echo 0.3.
 DKMS_VER="0.3.1"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOG_PREFIX="[ugreen-leds]"
+UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/miskcoo/ugreen_leds_controller.git}"
 
 NETIF="${NETIF:-}"
 MAPPING_METHOD="${MAPPING_METHOD:-ata}"
@@ -27,18 +22,11 @@ UGREEN NAS LED installer ${VERSION}
 Must run as root on the physical host (PVE / Debian), not in a VM or LXC.
 
 Usage:
-  sudo bash install.sh                 # detect hardware, build DKMS, enable services
-  sudo NETIF=enp3s0 bash install.sh    # pin the network LED to a NIC
+  sudo bash install.sh
+  sudo NETIF=enp3s0 bash install.sh
   sudo MAPPING_METHOD=serial bash install.sh
   sudo bash install.sh --status
   sudo bash install.sh --uninstall
-  sudo bash install.sh --help
-
-Environment:
-  NETIF            NIC name for netdev LED (auto-detected if empty)
-  MAPPING_METHOD   ata | hctl | serial     (default: ata)
-  SKIP_APT         1 to skip apt install
-  ENABLE_SERVICES  0 to install files but not enable systemd units
 EOF
 }
 
@@ -65,12 +53,9 @@ not_container() {
 detect_distro() {
     # shellcheck disable=SC1091
     . /etc/os-release
-    ID_LIKE="${ID_LIKE:-}"
     case "${ID:-}-${ID_LIKE:-}" in
         debian*|ubuntu*|*-debian*|*-ubuntu*) ;;
-        *)
-            log "warning: ID=${ID:-unknown} is not Debian-like; continuing anyway"
-            ;;
+        *) log "warning: ID=${ID:-unknown} is not Debian-like; continuing anyway" ;;
     esac
     IS_PVE=0
     if command -v pveversion >/dev/null 2>&1 || [ -e /etc/pve ]; then
@@ -80,14 +65,12 @@ detect_distro() {
 
 install_packages() {
     [ "$SKIP_APT" = "1" ] && { log "SKIP_APT=1, not installing packages"; return; }
-
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -y
     apt-get install -y --no-install-recommends \
-        build-essential dkms gcc g++ make \
+        build-essential dkms gcc g++ make git \
         i2c-tools smartmontools kmod \
         ca-certificates pciutils
-
     kver="$(uname -r)"
     if [ ! -d "/lib/modules/${kver}/build" ]; then
         log "kernel headers missing for ${kver}, installing..."
@@ -103,6 +86,36 @@ install_packages() {
         fi
     fi
     [ -d "/lib/modules/${kver}/build" ] || die "headers still missing: /lib/modules/${kver}/build"
+}
+
+ensure_vendor() {
+    local need=0
+    [ -f "${ROOT}/kmod/led-ugreen.c" ] || need=1
+    [ -f "${ROOT}/cli/ugreen_leds_cli.cpp" ] || need=1
+    [ -f "${ROOT}/scripts/ugreen-diskiomon" ] || need=1
+    [ -f "${ROOT}/scripts/ugreen-netdevmon" ] || need=1
+    [ -f "${ROOT}/scripts/ugreen-leds.conf" ] || need=1
+    [ -f "${ROOT}/scripts/check-standby.cpp" ] || need=1
+    [ "$need" -eq 0 ] && return 0
+
+    log "some vendor sources are missing; cloning ${UPSTREAM_REPO}"
+    command -v git >/dev/null 2>&1 || die "git is required to fetch upstream sources"
+    local tmp
+    tmp="$(mktemp -d)"
+    git clone --depth 1 "$UPSTREAM_REPO" "$tmp/src"
+    mkdir -p "${ROOT}/kmod" "${ROOT}/cli" "${ROOT}/scripts/systemd"
+    cp -n "$tmp/src/kmod/led-ugreen.c" "${ROOT}/kmod/" 2>/dev/null || cp "$tmp/src/kmod/led-ugreen.c" "${ROOT}/kmod/"
+    cp -n "$tmp/src/kmod/led-ugreen.h" "${ROOT}/kmod/" 2>/dev/null || true
+    cp -n "$tmp/src/kmod/Makefile" "${ROOT}/kmod/" 2>/dev/null || true
+    cp -n "$tmp/src/cli/"*.cpp "$tmp/src/cli/"*.h "$tmp/src/cli/Makefile" "${ROOT}/cli/" 2>/dev/null || true
+    cp -n "$tmp/src/scripts/ugreen-diskiomon" "$tmp/src/scripts/ugreen-netdevmon" \
+          "$tmp/src/scripts/ugreen-netdevmon-multi" "$tmp/src/scripts/ugreen-leds.conf" \
+          "$tmp/src/scripts/blink-disk.cpp" "$tmp/src/scripts/check-standby.cpp" \
+          "$tmp/src/scripts/ugreen-probe-leds" "$tmp/src/scripts/ugreen-power-led" \
+          "${ROOT}/scripts/" 2>/dev/null || true
+    rm -rf "$tmp"
+    [ -f "${ROOT}/kmod/led-ugreen.c" ] || die "failed to obtain kmod/led-ugreen.c"
+    [ -f "${ROOT}/scripts/ugreen-diskiomon" ] || die "failed to obtain scripts/ugreen-diskiomon"
 }
 
 ensure_i2c() {
@@ -175,17 +188,16 @@ install_cli_and_helpers() {
     make -C "${ROOT}/cli" clean >/dev/null 2>&1 || true
     make -C "${ROOT}/cli" -j"$(nproc)"
     install -m 0755 "${ROOT}/cli/ugreen_leds_cli" /usr/bin/ugreen_leds_cli
-
     if command -v g++ >/dev/null 2>&1; then
         log "building optional disk helpers"
         g++ -std=c++17 -O2 "${ROOT}/scripts/blink-disk.cpp" -o /usr/bin/ugreen-blink-disk
         g++ -std=c++17 -O2 "${ROOT}/scripts/check-standby.cpp" -o /usr/bin/ugreen-check-standby
     fi
-
     local f
     for f in ugreen-diskiomon ugreen-netdevmon ugreen-netdevmon-multi \
              ugreen-power-led ugreen-probe-leds ugreen-detect-disks \
              ugreen-detect-network ugreen-leds-status; do
+        [ -f "${ROOT}/scripts/${f}" ] || continue
         install -m 0755 "${ROOT}/scripts/${f}" "/usr/bin/${f}"
     done
 }
@@ -200,7 +212,6 @@ install_config() {
     if grep -q '^MAPPING_METHOD=' /etc/ugreen-leds.conf; then
         sed -i "s/^MAPPING_METHOD=.*/MAPPING_METHOD=${MAPPING_METHOD}/" /etc/ugreen-leds.conf
     fi
-
     cat > /etc/modules-load.d/ugreen-led.conf <<'EOF'
 i2c-dev
 i2c-i801
@@ -208,7 +219,6 @@ led-ugreen
 ledtrig-oneshot
 ledtrig-netdev
 EOF
-
     install -m 0644 "${ROOT}/scripts/systemd/"*.service /etc/systemd/system/
 }
 
@@ -252,7 +262,7 @@ Useful commands:
 
 If a disk LED does not match the physical bay:
   1) run: ugreen-detect-disks ata
-  2) edit /etc/ugreen-leds.conf  (MAPPING_METHOD / DISK_SERIAL)
+  2) edit /etc/ugreen-leds.conf
   3) systemctl restart ugreen-diskiomon
 
 To uninstall:
@@ -280,12 +290,12 @@ main() {
         ""|--install) ;;
         *) die "unknown argument: $1 (try --help)" ;;
     esac
-
     need_root
     not_container
     detect_distro
     log "installing ugreen-nas-leds ${VERSION} on $(uname -r) (pve=${IS_PVE})"
     install_packages
+    ensure_vendor
     ensure_i2c
     pick_netif
     install_kmod
