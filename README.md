@@ -95,6 +95,42 @@ systemctl restart ugreen-diskiomon
 dd if=/dev/sdX of=/dev/null bs=1M count=200 status=progress
 ```
 
+## PCI 直通 / 硬盘灯
+
+在 Proxmox 等环境里，若把 SATA HBA（常见如 ASM1164）`hostpci` 直通给 NAS 虚拟机，宿主机上的 `ugreen-diskiomon` 会先短暂看到盘，随后盘从宿主消失，盘位被标成 **UNAVAIL**，默认常亮 **红灯**（上游 `COLOR_DISK_UNAVAIL`）。
+
+这不是故障灯逻辑坏了：宿主 **看不到** 虚拟机里的磁盘 I/O，因此 **无法** 再为直通盘位做读写闪烁 / 待机变色 / SMART 状态。电源灯、网口灯仍由宿主正常驱动。
+
+本仓库在安装时额外启用 oneshot 服务 `ugreen-passthrough-disk-leds`：
+
+1. 用 `lspci` 看 `UGREEN_HBA_PCI`（默认 `01:00.0`）的驱动是否为 `vfio-pci`
+2. **仅当** 是 `vfio-pci` 时，把配置的盘位灯刷成装饰性白灯（默认 `255 255 255`）
+3. 若 HBA 仍由宿主 `ahci` 等驱动占用，脚本 **直接退出、不改灯**，读写闪烁与健康色逻辑保持原样
+
+建议（直通场景）在 `/etc/ugreen-leds.conf` 里把不可用色也改成白，避免 diskiomon 先刷红再被 oneshot 盖掉：
+
+```bash
+COLOR_DISK_UNAVAIL="255 255 255"
+```
+
+可选覆盖写在 `/etc/default/ugreen-passthrough-leds`：
+
+```bash
+UGREEN_HBA_PCI=01:00.0
+UGREEN_PASSTHROUGH_BAYS="disk1 disk2 disk3 disk4"
+UGREEN_PASSTHROUGH_COLOR="255 255 255"
+```
+
+关掉装饰白灯 / 恢复宿主监控：
+
+```bash
+systemctl disable --now ugreen-passthrough-disk-leds.service
+# 取消 VM 的 HBA 直通、把盘还给宿主后：
+systemctl restart ugreen-diskiomon
+```
+
+把盘交回宿主后，只要 HBA 不再是 `vfio-pci`，oneshot 不会再覆盖；`ugreen-diskiomon` 恢复完整状态灯。
+
 ## PVE 8 注意
 
 - 装在 **NODE** 上，不要装在 VM 里。
