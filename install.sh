@@ -196,7 +196,8 @@ install_cli_and_helpers() {
     local f
     for f in ugreen-diskiomon ugreen-netdevmon ugreen-netdevmon-multi \
              ugreen-power-led ugreen-probe-leds ugreen-detect-disks \
-             ugreen-detect-network ugreen-leds-status; do
+             ugreen-detect-network ugreen-leds-status \
+             ugreen-passthrough-disk-leds.sh; do
         [ -f "${ROOT}/scripts/${f}" ] || continue
         install -m 0755 "${ROOT}/scripts/${f}" "/usr/bin/${f}"
     done
@@ -220,6 +221,9 @@ ledtrig-oneshot
 ledtrig-netdev
 EOF
     install -m 0644 "${ROOT}/scripts/systemd/"*.service /etc/systemd/system/
+    if [ ! -f /etc/default/ugreen-passthrough-leds ] && [ -f "${ROOT}/scripts/ugreen-passthrough-leds.default" ]; then
+        install -m 0644 "${ROOT}/scripts/ugreen-passthrough-leds.default" /etc/default/ugreen-passthrough-leds
+    fi
 }
 
 load_and_probe() {
@@ -242,6 +246,10 @@ enable_services() {
     if [ -n "${NETIF}" ]; then
         systemctl enable --now "ugreen-netdevmon@${NETIF}.service"
     fi
+    # Safe on non-passthrough hosts: script no-ops unless HBA is vfio-pci
+    if [ -f /etc/systemd/system/ugreen-passthrough-disk-leds.service ]; then
+        systemctl enable --now ugreen-passthrough-disk-leds.service
+    fi
 }
 
 print_next() {
@@ -258,7 +266,7 @@ Useful commands:
   ugreen-leds-status
   ugreen-detect-disks ${MAPPING_METHOD}
   ls /sys/class/leds
-  journalctl -u ugreen-diskiomon -u ugreen-probe-leds -f
+  journalctl -u ugreen-diskiomon -u ugreen-probe-leds -u ugreen-passthrough-disk-leds -f
 
 If a disk LED does not match the physical bay:
   1) run: ugreen-detect-disks ata

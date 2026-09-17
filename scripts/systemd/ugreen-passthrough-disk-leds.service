@@ -1,0 +1,13 @@
+[Unit]
+Description=UGREEN decorative white LEDs for HBA-passthrough disk bays
+After=ugreen-probe-leds.service ugreen-diskiomon.service
+Wants=ugreen-probe-leds.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/ugreen-passthrough-leds
+ExecStart=/usr/bin/ugreen-passthrough-disk-leds.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

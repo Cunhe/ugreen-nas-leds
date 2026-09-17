@@ -1,0 +1,11 @@
+# Optional overrides for ugreen-passthrough-disk-leds.service
+# Installed as /etc/default/ugreen-passthrough-leds (create only if missing).
+
+# PCI BDF of the SATA HBA that may be hostpci-passthrough to a VM
+# UGREEN_HBA_PCI=01:00.0
+
+# Bay LED names to paint when that HBA is bound to vfio-pci
+# UGREEN_PASSTHROUGH_BAYS="disk1 disk2 disk3 disk4"
+
+# RGB color (default white)
+# UGREEN_PASSTHROUGH_COLOR="255 255 255"
