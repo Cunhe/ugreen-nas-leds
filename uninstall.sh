@@ -9,6 +9,7 @@ echo "[ugreen-leds] stopping services"
 systemctl disable --now ugreen-diskiomon.service 2>/dev/null || true
 systemctl disable --now ugreen-power-led.service 2>/dev/null || true
 systemctl disable --now ugreen-probe-leds.service 2>/dev/null || true
+systemctl disable --now ugreen-passthrough-disk-leds.service 2>/dev/null || true
 systemctl disable --now ugreen-netdevmon-multi.service 2>/dev/null || true
 systemctl list-units --type=service --all 'ugreen-netdevmon@*' --no-legend \
     | awk '{print $1}' \
@@ -36,14 +37,16 @@ rm -f /usr/bin/ugreen_leds_cli \
       /usr/bin/ugreen-probe-leds \
       /usr/bin/ugreen-detect-disks \
       /usr/bin/ugreen-detect-network \
-      /usr/bin/ugreen-leds-status
+      /usr/bin/ugreen-leds-status \
+      /usr/bin/ugreen-passthrough-disk-leds.sh
 rm -f /etc/systemd/system/ugreen-diskiomon.service \
       /etc/systemd/system/ugreen-netdevmon-multi.service \
       /etc/systemd/system/ugreen-netdevmon@.service \
       /etc/systemd/system/ugreen-power-led.service \
-      /etc/systemd/system/ugreen-probe-leds.service
+      /etc/systemd/system/ugreen-probe-leds.service \
+      /etc/systemd/system/ugreen-passthrough-disk-leds.service
 rm -f /etc/modules-load.d/ugreen-led.conf
 systemctl daemon-reload
 
-echo "[ugreen-leds] left in place (edit by hand if you want it gone): /etc/ugreen-leds.conf"
+echo "[ugreen-leds] left in place (edit by hand if you want it gone): /etc/ugreen-leds.conf /etc/default/ugreen-passthrough-leds"
 echo "[ugreen-leds] uninstall complete"
